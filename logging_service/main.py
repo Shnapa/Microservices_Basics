@@ -12,7 +12,7 @@ messages_store: dict[str, str] = {}
 @app.post("/log")
 def log_message(data: LogMessage):
     if data.uuid in messages_store:
-        print(f"Duplicate message ignored: {data.uuid} -> {data.msg}")
+        print(f"Ignored duplicate message: {data.uuid} -> {data.msg}")
         return {"status": "duplicate_ignored"}
 
     messages_store[data.uuid] = data.msg

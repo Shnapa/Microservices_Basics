@@ -32,7 +32,6 @@ async def send_to_logging_with_retry(message_id: str, msg: str, retries: int = 3
             await asyncio.sleep(delay)
             attempt += 1
 
-
 @app.post("/messages")
 async def send_message(payload: IncomingMessage):
     message_id = str(uuid.uuid4())
