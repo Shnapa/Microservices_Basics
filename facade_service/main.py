@@ -15,7 +15,6 @@ class IncomingTransaction(BaseModel):
     amount: float
 
 
-# accumulators for timing
 total_logging_time = 0.0
 total_counter_time = 0.0
 
