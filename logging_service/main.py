@@ -1,25 +1,32 @@
 from fastapi import FastAPI
 from pydantic import BaseModel
+from typing import Dict, List
+from datetime import datetime
 
 app = FastAPI()
 
-class LogMessage(BaseModel):
-    uuid: str
-    msg: str
 
-messages_store: dict[str, str] = {}
+class Transaction(BaseModel):
+    transaction_id: str
+    user_id: str
+    amount: float
+    timestamp: str
+
+
+transactions_by_user: Dict[str, List[Transaction]] = {}
+
 
 @app.post("/log")
-def log_message(data: LogMessage):
-    if data.uuid in messages_store:
-        print(f"Ignored duplicate message: {data.uuid} -> {data.msg}")
-        return {"status": "duplicate_ignored"}
-
-    messages_store[data.uuid] = data.msg
-    print(f"Logged: {data.uuid} -> {data.msg}")
+def log_transaction(tx: Transaction):
+    """Store transaction in memory."""
+    user_tx = transactions_by_user.setdefault(tx.user_id, [])
+    user_tx.append(tx)
+    print(f"Logged tx: {tx.transaction_id} user={tx.user_id} amount={tx.amount}")
     return {"status": "logged"}
 
-@app.get("/messages")
-def get_messages():
-    all_msgs = " | ".join(messages_store.values())
-    return {"messages": all_msgs}
+
+@app.get("/user/{user_id}")
+def get_user_transactions(user_id: str):
+    """Return all transactions for a given user."""
+    txs = transactions_by_user.get(user_id, [])
+    return {"user_id": user_id, "transactions": txs}
