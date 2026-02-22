@@ -2,57 +2,100 @@ from fastapi import FastAPI
 from pydantic import BaseModel
 import uuid
 import httpx
-import asyncio
+import time
 
 app = FastAPI()
 
 LOGGING_URL = "http://127.0.0.1:8002"
-MESSAGES_URL = "http://127.0.0.1:8003"
+COUNTER_URL = "http://127.0.0.1:8003"
 
 
-class IncomingMessage(BaseModel):
-    msg: str
+class IncomingTransaction(BaseModel):
+    user_id: str
+    amount: float
 
 
-async def send_to_logging_with_retry(message_id: str, msg: str, retries: int = 3, delay: float = 1.0):
-    attempt = 1
-    while attempt <= retries:
-        try:
-            async with httpx.AsyncClient(timeout=2.0) as client:
-                resp = await client.post(
-                    f"{LOGGING_URL}/log",
-                    json={"uuid": message_id, "msg": msg},
-                )
-            print(f"Attempt {attempt}: status={resp.status_code}")
-            return resp
-        except httpx.RequestError as e:
-            print(f"Attempt {attempt} failed: {e}")
-            if attempt == retries:
-                raise
-            await asyncio.sleep(delay)
-            attempt += 1
-
-@app.post("/messages")
-async def send_message(payload: IncomingMessage):
-    message_id = str(uuid.uuid4())
-    print(f"Received from client: {message_id} -> {payload.msg}")
-
-    resp = await send_to_logging_with_retry(message_id, payload.msg)
-    print(f"Forwarded to logging-service, final_status={resp.status_code}, body={resp.json()}")
-
-    return {"uuid": message_id, "status": "stored"}
+# accumulators for timing
+total_logging_time = 0.0
+total_counter_time = 0.0
 
 
-@app.get("/messages")
-async def collect_messages():
+@app.post("/transactions")
+async def create_transaction(tx: IncomingTransaction):
+    global total_logging_time, total_counter_time
+
+    transaction_id = str(uuid.uuid4())
+    timestamp = time.time()
+
+    payload = {
+        "transaction_id": transaction_id,
+        "user_id": tx.user_id,
+        "amount": tx.amount,
+        "timestamp": str(timestamp),
+    }
+
     async with httpx.AsyncClient() as client:
-        logging_resp = await client.get(f"{LOGGING_URL}/messages")
-        messages_resp = await client.get(f"{MESSAGES_URL}/")
+        t0 = time.perf_counter()
+        log_resp = await client.post(f"{LOGGING_URL}/log", json=payload)
+        t1 = time.perf_counter()
+        total_logging_time += (t1 - t0)
 
-    logging_text = logging_resp.json().get("messages", "")
-    stub_text = messages_resp.json().get("message", "")
+        t2 = time.perf_counter()
+        counter_resp = await client.post(
+            f"{COUNTER_URL}/apply",
+            json={"user_id": tx.user_id, "amount": tx.amount},
+        )
+        t3 = time.perf_counter()
+        total_counter_time += (t3 - t2)
 
-    combined = logging_text + " || " + stub_text
-    print(f"Combined response: {combined}")
+    log_status = log_resp.json().get("status")
+    new_balance = counter_resp.json().get("balance")
 
-    return {"result": combined}
+    print(
+        f"Facade: tx={transaction_id} user={tx.user_id} amount={tx.amount} "
+        f"log_status={log_status} balance={new_balance}"
+    )
+
+    return {
+        "transaction_id": transaction_id,
+        "balance": new_balance,
+    }
+
+
+@app.get("/user/{user_id}")
+async def get_user_info(user_id: str):
+    async with httpx.AsyncClient() as client:
+        bal_resp = await client.get(f"{COUNTER_URL}/user/{user_id}")
+        log_resp = await client.get(f"{LOGGING_URL}/user/{user_id}")
+
+    balance = bal_resp.json().get("balance", 0.0)
+    transactions = log_resp.json().get("transactions", [])
+
+    return {
+        "user_id": user_id,
+        "balance": balance,
+        "transactions": transactions,
+    }
+
+
+@app.get("/accounts")
+async def get_all_accounts():
+    async with httpx.AsyncClient() as client:
+        resp = await client.get(f"{COUNTER_URL}/accounts")
+    return resp.json()
+
+
+@app.get("/timing")
+def get_timings():
+    return {
+        "total_logging_time_seconds": total_logging_time,
+        "total_counter_time_seconds": total_counter_time,
+    }
+
+
+@app.post("/timing/reset")
+def reset_timings():
+    global total_logging_time, total_counter_time
+    total_logging_time = 0.0
+    total_counter_time = 0.0
+    return {"status": "reset"}
