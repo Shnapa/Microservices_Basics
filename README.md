@@ -42,19 +42,22 @@ uvicorn main:app --port 8003
 cd facade_service
 uvicorn main:app --port 8001
 ```
+
 Screenshots:
 
-![Basic curl requests and responses](images/basic.png)
-*Three POST `/transactions` for `demo_user` and the final `GET /user/demo_user` with balance 3.0.*
+![Basic curl requests and responses](images/basic.png)  
+*Two `POST /transactions` calls for `user_mixed` with `amount = 20` and `amount = -5`, plus the final `GET /user/user_mixed` showing balance 15.0.*
 
-![Facade logs for basic test](images/basic_facade.png)
-*facade_service logs showing each POST `/transactions` and the final GET request.*
+![Facade logs for basic test](images/basic_facade.png)  
+*`facade_service` logs showing the `POST /transactions` requests for `user_mixed` (including the negative amount) and the final `GET /user/user_mixed`.*
 
-![Logging service logs for basic test](images/basic_log.png)
-*logging_service logs showing three `POST /log` requests for `demo_user`.*
+![Logging service logs for basic test](images/basic_log.png)  
+*`logging_service` logs showing two `POST /log` requests for `user_mixed`, including the transaction with `amount = -5`.*
 
-![Counter service logs for basic test](images/basic_count.png)
-*counter_service logs showing three `POST /apply` calls for `demo_user` and the final `GET /user/demo_user`.*
+![Counter service logs for basic test](images/basic_count.png)  
+*`counter_service` logs showing `POST /apply` calls for `user_mixed` with amounts `20` and `-5`, and the final `GET /user/user_mixed` with balance 15.0.*
+
+
 
 ## Load test scenarios
 
