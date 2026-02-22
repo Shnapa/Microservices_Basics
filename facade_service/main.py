@@ -6,8 +6,8 @@ import time
 
 app = FastAPI()
 
-LOGGING_URL = "http://127.0.0.1:8002"
-COUNTER_URL = "http://127.0.0.1:8003"
+LOGGING_URL = "http://logging_service:8002"
+COUNTER_URL = "http://counter_service:8003"
 
 
 class IncomingTransaction(BaseModel):
