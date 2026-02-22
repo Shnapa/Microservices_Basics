@@ -44,16 +44,16 @@ uvicorn main:app --port 8001
 ```
 Screenshots:
 
-![Basic curl requests and responses](images/basic.jpg)
+![Basic curl requests and responses](images/basic.png)
 *Three POST `/transactions` for `demo_user` and the final `GET /user/demo_user` with balance 3.0.*
 
-![Facade logs for basic test](images/basic_facade.jpg)
+![Facade logs for basic test](images/basic_facade.png)
 *facade_service logs showing each POST `/transactions` and the final GET request.*
 
-![Logging service logs for basic test](images/basic_log.jpg)
+![Logging service logs for basic test](images/basic_log.png)
 *logging_service logs showing three `POST /log` requests for `demo_user`.*
 
-![Counter service logs for basic test](images/basic_count.jpg)
+![Counter service logs for basic test](images/basic_count.png)
 *counter_service logs showing three `POST /apply` calls for `demo_user` and the final `GET /user/demo_user`.*
 
 ## Load test scenarios
@@ -74,10 +74,10 @@ The expected result is that every account ends with balance 10 000, and the lo
 
 Screenshots:
 
-![Scenario 1 load test output](images/scenario1.jpg)  
+![Scenario 1 load test output](images/scenario1.png)  
 *Console output of `load_test.py` for Scenario 1 with total time, RPS and final balances for `user1`…`user10`.*
 
-![Scenario 1 counter service logs](images/scenario1_counter.jpg)  
+![Scenario 1 counter service logs](images/scenario1_counter.png)  
 *`counter_service` logs showing many `POST /apply` requests for users `user1`…`user10` during Scenario 1.*
 
 ---
@@ -89,10 +89,10 @@ The expected result is that `same_user` ends with balance 100 000, and the log
 
 Screenshots:
 
-![Scenario 2 load test output](images/scenario2.jpg)  
+![Scenario 2 load test output](images/scenario2.png)  
 *Console output of `load_test.py` for Scenario 2 with total time, RPS and the final balance for `same_user`.*
 
-![Scenario 2 counter service logs](images/scenario2_counter.jpg)  
+![Scenario 2 counter service logs](images/scenario2_counter.png)  
 *`counter_service` logs showing `POST /apply` requests for `same_user` and the final `GET /user/same_user` call.*
 
 ## Conclusion
