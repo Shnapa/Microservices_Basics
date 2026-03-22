@@ -187,7 +187,7 @@ Again Lab 3 is faster and the result is correct.
 
 **Lab 3 result:**
 
-![Lab 3 Scenario_1](images/testlab4.png)
+![Lab 3 Scenario_2](images/testlab4.png)
 
 ---
 
