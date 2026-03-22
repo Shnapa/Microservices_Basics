@@ -1,93 +1,198 @@
-# Microservices Basics – Facade, Logging, Counter
+# Lab 3 – Microservices with Hazelcast Distributed Map
 
-### Requirements
+## Requirements
 
-- Python 3.11+
-- pip (Python package manager)
 - Docker + Docker Compose
+- Python 3.11+
+- `pip3 install httpx --break-system-packages`
 
-### Addditional installations for local run
-```bash
-pip install fastapi uvicorn httpx
+## 1. Changes from Lab 1
+
+In Lab 1, each service kept all data in memory. This meant two things: if a service restarted, all data was gone. And if too many requests came in, a single `logging_service` would get overwhelmed.
+
+In Lab 3 we fix both of these problems:
+
+- **logging_service** now runs as 3 separate instances. Each one is connected to its own Hazelcast node. All instances share the same Distributed Map, so it does not matter which one writes because all of them can read the data.
+- **counter_service** now saves balances to PostgreSQL. The data survives restarts and is not lost.
+- **facade_service** now randomly picks one of the 3 logging instances for each request. If the chosen one is down, it automatically tries the next one.
+
+## 2. Architecture
+
+```
+Client
+  │
+  ▼
+facade_service (port 8001)
+  ├──► logging_service_1 (port 8002) ──► hz1 ──┐
+  ├──► logging_service_2 (port 8012) ──► hz2 ──┤──► shared Distributed Map
+  └──► logging_service_3 (port 8022) ──► hz3 ──┘
+  │
+  └──► counter_service (port 8003) ──► PostgreSQL
 ```
 
-## 1. Description
+The key idea of Hazelcast Distributed Map is that the data is not stored in one place (it is spread across all 3 nodes). So even if one node goes down, the other two still have the data and the system keeps working.
 
-In this project I implemented a small microservices-based system with three FastAPI services and an asynchronous Python client:
-
-- **facade_service** – main HTTP API for clients. It accepts transaction requests, forwards them to the other services, aggregates the responses and returns final results.
-- **logging_service** – receives information about each transaction and stores it in an in-memory log so we can see and measure how much logging contributes to total processing time.
-- **counter_service** – maintains in-memory balances for users. It applies `+1` operations and returns current balances per user.
-
-I also wrote a load-testing client `load_test.py` (using `httpx` + `asyncio`) that simulates 10 concurrent clients and runs two scenarios from the assignment (separate accounts vs one shared account).
-
-## 2. Basic behaviour
-
-### Run with Docker Compose
-From the project root:
+## 3. How to run
 
 ```bash
 docker compose up --build
 ```
 
-This starts three containers:
-- logging_service on port 8002
-- counter_service on port 8003
-- facade_service on port 8001
-The client and curl commands below talk to facade_service on http://127.0.0.1:8001
-
-![Basic curl requests and responses](images/basic.png)  
-
-To verify the basic logic before running load tests, I started all three services (via Docker Compose) and executed several POST /transactions requests with positive and negative amounts for two different users, followed by GET requests to check the final balances.
-
-![logs for basic test](images/basic_outputs.png) 
-
-The responses show that:
-user_a ends with balance 15.0 and two transactions +10 and +5.
-user_b ends with balance 13.0 and two transactions +20 and -7.
-/accounts returns both balances (user_a: 15.0, user_b: 13.0).
-
-
-## Load test scenarios
-
-To test the system under load, I used the `load_test.py` client which simulates 10 concurrent clients and runs two scenarios.  
-Both scenarios finished successfully and produced the expected final balances.
-
-### How to run
-
-With all three services running (via Docker Compose):
-```bash
-python3.11 load_test.py
-```
-
-### Scenario 1 – 10 clients, 10k tx each, separate accounts
-
-In the first scenario, 10 virtual clients each send 10 000 `POST /transactions` requests to **their own** account (`user1` … `user10`).  
-The expected result is that every account ends with balance 10 000, and the logs show that all updates were applied.
-
-Screenshots:
-
-![Scenario 1 load test output](images/scenario1.png)  
-Console output of load_test.py for Scenario 1 with total time (~1146 s), 100 000 requests (≈87 RPS) and final balances 10 000.0 for user1…user10, plus accumulated timing for logging and counter services.
+This starts 9 containers:
+- `hz1`, `hz2`, `hz3` – the 3 Hazelcast nodes that form one cluster
+- `hazelcast-mc` – a web UI to monitor the cluster at http://localhost:8080
+- `postgres` – the database for counter_service
+- `logging_service_1`, `logging_service_2`, `logging_service_3` – the 3 logging instances
+- `counter_service` – handles user balances
+- `facade_service` – the only service the client talks to
 
 ---
 
-### Scenario 2 – 10 clients, 10k tx each, same account
+## 4. Basic test
 
-In the second scenario, the same 10 clients each send 10 000 `POST /transactions` requests to **one shared** account (`same_user`).  
-The expected result is that `same_user` ends with balance 100 000, and the logs show that all operations on this single account were processed correctly.
+I send 10 POST requests to facade_service. Each request goes to a randomly chosen logging instance:
 
-Screenshots:
+```bash
+for i in $(seq 1 10); do
+  curl -s -X POST http://localhost:8001/transactions \
+    -H "Content-Type: application/json" \
+    -d "{\"user_id\": \"user1\", \"amount\": $i}" | python3 -m json.tool
+done
+```
 
-![Scenario 2 load test output](images/scenario2.png)  
-Console output of load_test.py for Scenario 2 with total time (~1145 s), 100 000 requests (≈87 RPS), final balance 100 000.0 for same_user, and separate totals for time spent calling logging and counter services.
+The response includes a `logged_by` field that shows which logging instance handled the request. In my test, the 10 transactions were split like this:
+- `logging_service_1` – received amounts 1, 2, 3, 5
+- `logging_service_2` – received amounts 6, 7, 8, 10
+- `logging_service_3` – received amounts 4, 9
 
-## Conclusion
+This shows that facade_service is actually distributing requests randomly across all 3 instances.
 
-The basic manual tests show that the facade, logging and counter services work correctly together:
-simple POST /transactions and GET /user/{id} calls update balances as expected, support both positive and negative amounts, and are properly logged by all services.
+![POST 10 transactions](images/run1.png)
 
-The two load scenarios confirm that the system handles concurrent traffic correctly:
-for 10 clients with 10k transactions each, all separate accounts reach 10 000 and the shared account reaches 100 000 without lost or duplicated updates.
+### Logs of each logging_service instance
 
-The measured times and request rates demonstrate realistic performance for this architecture and clearly highlight the cost of inter‑service communication and updates to a single shared account under high load.
+Each instance prints which transactions it personally received. But since all data goes to the shared Hazelcast map, any instance can read all transactions — not just the ones it wrote.
+
+![logging_service_1 logs](images/logging_1.png)
+![logging_service_2 logs](images/logging_2.png)
+![logging_service_3 logs](images/logging_3.png)
+
+### GET all messages
+
+I read all transactions back through facade_service:
+
+```bash
+curl -s http://localhost:8001/messages | python3 -m json.tool
+```
+
+All 10 transactions are returned, even though they were written by 3 different instances. This works because they all write to the same Hazelcast Distributed Map.
+
+![GET messages part 1](images/curl_1.png)
+![GET messages part 2](images/curl_2.png)
+
+---
+
+## 5. Turning off logging instances
+
+### Stop 1 instance
+
+```bash
+docker stop logging_service_1
+```
+
+I stop `logging_service_1` and then send a new transaction. facade_service tries `logging_service_1` first, gets no response, and immediately tries the next one. The transaction is written successfully by `logging_service_3`. All previous data is still readable because it lives in Hazelcast, not inside the stopped instance.
+
+![Stop 1 instance – POST and GET](images/test_1_1.png)
+![GET result after stop 1](images/test_1_2.png)
+
+### Stop 2 instances
+
+```bash
+docker stop logging_service_2
+```
+
+Now only `logging_service_3` is running. The system still works, facade_service finds the only available instance and uses it. All 12 transactions (10 original + 2 new) are still readable.
+
+![Stop 2 instances – POST and GET](images/test_2_1.png)
+![GET result after stop 2](images/test_2_2.png)
+
+---
+
+## 6. Turning off Hazelcast nodes
+
+### Stop 1 node
+
+```bash
+docker start logging_service_1 logging_service_2
+docker stop hz1
+```
+
+I bring back the logging instances and stop one Hazelcast node. `logging_service_1` is connected to `hz1` which is now down, but `logging_service_2` is connected to `hz2` which still works. facade_service routes to `logging_service_2` and the transaction goes through. No data is lost because Hazelcast keeps copies of data on multiple nodes.
+
+![Stop hz1 – POST and GET](images/test_3_1.png)
+![GET result after stop hz1](images/test_3_2.png)
+
+### Stop 2 nodes
+
+```bash
+docker stop hz2
+```
+
+Now both `hz1` and `hz2` are stopped. Only `hz3` is left, but `logging_service_3` was already stopped earlier. So all 3 logging instances either cannot reach their Hazelcast node or are stopped. The system returns `All logging instances unavailable`.
+
+This is expected — it is the same limitation we saw in Lab 2. When too many nodes fail at the same time, the system cannot recover on its own.
+
+![Stop hz1 and hz2](images/test_4.png)
+
+---
+
+## 7. Load test
+
+We restart everything and run the same load test as in Lab 1:
+
+```bash
+docker start hz1 hz2
+python3 load_test.py
+```
+
+### Scenario 1 – 10 users, 10k transactions each, separate accounts
+
+10 users each send 10,000 transactions to their own account. Every account should end with balance 10,000.
+
+- Lab 1: total time ~1147s, RPS ~87, all balances correct
+- Lab 3: total time ~846s, RPS ~118, all balances correct
+
+Lab 3 finished about 5 minutes faster and handled ~35% more requests per second.
+
+**Lab 1 result:**
+
+![Lab 1 Scenario 1](images/testlab1.png)
+
+**Lab 3 result:**
+
+![Lab 3 load test](images/load_py.png)
+
+### Scenario 2 – 10 clients, 10k transactions each, same user
+
+10 clients all send transactions to one shared account. The final balance should be 100,000.
+
+- Lab 1: total time ~1145s, RPS ~87, final balance 100,000
+- Lab 3: total time ~811s, RPS ~123, final balance 100,000
+
+Again Lab 3 is faster and the result is correct.
+
+**Lab 1 result:**
+
+![Lab 1 Scenario 2](images/testlab2.png)
+
+---
+
+## 8. Results and conclusion
+
+Lab 3 is about 35% faster than Lab 1 in both scenarios. The main reasons are:
+
+**PostgreSQL is better under high load than Python in-memory dict.** When many requests come in at the same time, Python has to handle them one by one because of how it manages memory internally. PostgreSQL handles concurrent writes natively and uses atomic operations to update balances safely without losing any data.
+
+**3 logging instances spread the work.** In Lab 1, one logging_service had to handle every single request. In Lab 3, the load is split across 3 instances, so each one does less work.
+
+**Hazelcast keeps data safe.** Even when instances or nodes go down, the data stays accessible as long as at least one node is running. This makes the system much more reliable compared to Lab 1 where any restart would wipe all logs.

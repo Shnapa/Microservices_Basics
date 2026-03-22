@@ -1,23 +1,127 @@
 version: "3.9"
 
 services:
-  logging_service:
+
+  # Hazelcast cluster (3 nodes) #
+  hz1:
+    image: hazelcast/hazelcast:5.3
+    container_name: hz1
+    environment:
+      - HZ_CLUSTERNAME=dev
+    ports:
+      - "5701:5701"
+
+  hz2:
+    image: hazelcast/hazelcast:5.3
+    container_name: hz2
+    environment:
+      - HZ_CLUSTERNAME=dev
+    ports:
+      - "5702:5701"
+
+  hz3:
+    image: hazelcast/hazelcast:5.3
+    container_name: hz3
+    environment:
+      - HZ_CLUSTERNAME=dev
+    ports:
+      - "5703:5701"
+
+  management-center:
+    image: hazelcast/management-center:5.3
+    container_name: hazelcast-mc
+    ports:
+      - "8080:8080"
+    environment:
+      - MC_DEFAULT_CLUSTER=dev
+      - MC_DEFAULT_CLUSTER_MEMBERS=hz1:5701,hz2:5701,hz3:5701
+    depends_on:
+      - hz1
+      - hz2
+      - hz3
+
+  # PostgreSQL for counter_service #
+  postgres:
+    image: postgres:15
+    container_name: postgres
+    environment:
+      - POSTGRES_DB=counterdb
+      - POSTGRES_USER=user
+      - POSTGRES_PASSWORD=password
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+
+  # logging_service (3 instances) #
+  logging_service_1:
     build: ./logging_service
-    container_name: logging_service
+    container_name: logging_service_1
     ports:
       - "8002:8002"
+    environment:
+      - HZ_HOST=hz1
+      - HZ_PORT=5701
+      - SERVICE_NAME=logging_service_1
+    depends_on:
+      - hz1
+      - hz2
+      - hz3
 
+  logging_service_2:
+    build: ./logging_service
+    container_name: logging_service_2
+    ports:
+      - "8012:8002"
+    environment:
+      - HZ_HOST=hz2
+      - HZ_PORT=5701
+      - SERVICE_NAME=logging_service_2
+    depends_on:
+      - hz1
+      - hz2
+      - hz3
+
+  logging_service_3:
+    build: ./logging_service
+    container_name: logging_service_3
+    ports:
+      - "8022:8002"
+    environment:
+      - HZ_HOST=hz3
+      - HZ_PORT=5701
+      - SERVICE_NAME=logging_service_3
+    depends_on:
+      - hz1
+      - hz2
+      - hz3
+
+  # counter_service #
   counter_service:
     build: ./counter_service
     container_name: counter_service
     ports:
       - "8003:8003"
+    environment:
+      - DB_HOST=postgres
+      - DB_PORT=5432
+      - DB_NAME=counterdb
+      - DB_USER=user
+      - DB_PASS=password
+    depends_on:
+      - postgres
 
+  # facade_service #
   facade_service:
     build: ./facade_service
     container_name: facade_service
     ports:
       - "8001:8001"
     depends_on:
-      - logging_service
+      - logging_service_1
+      - logging_service_2
+      - logging_service_3
       - counter_service
+
+volumes:
+  postgres_data:
