@@ -170,7 +170,7 @@ Lab 3 finished about 5 minutes faster and handled ~35% more requests per second.
 
 **Lab 3 result:**
 
-![Lab 3 load test](images/load_py.png)
+![Lab 3 Scenario_1](images/testlab3.png)
 
 ### Scenario 2 – 10 clients, 10k transactions each, same user
 
@@ -184,6 +184,10 @@ Again Lab 3 is faster and the result is correct.
 **Lab 1 result:**
 
 ![Lab 1 Scenario 2](images/testlab2.png)
+
+**Lab 3 result:**
+
+![Lab 3 Scenario_1](images/testlab4.png)
 
 ---
 
