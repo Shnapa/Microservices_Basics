@@ -18,6 +18,8 @@ I also added a **config-server** that keeps track of all running service instanc
 | Registry | `config-server` | 8000 |
 | Queue nodes | `hazelcast1/2/3` | 5701, 5702, 5703 |
 
+All logging-service containers listen on port **8002 internally**, while different host ports (8002, 8004, 8005) are exposed externally via docker-compose for local access.
+
 **Request flow:**
 
 ```
@@ -53,7 +55,7 @@ docker-compose up --build
 
 ---
 
-## Step 1 — All services registered on config-server
+## All services registered on config-server
 
 After running `docker-compose up --build`, all 9 containers started. Each service registers itself on config-server at startup via a POST request. To verify:
 
@@ -77,11 +79,29 @@ curl http://localhost:8000/services
 }
 ```
 
-**Why it works:** Every service reads `CONFIG_SERVER_URL` from its environment variable and sends a POST `/register` request on startup. Config-server stores all URLs in a dictionary grouped by service name. This confirms that all 5 service types (3 logging instances + counter + facade) successfully connected to config-server.
+**Why it works:** Every service reads `CONFIG_SERVER_URL` from its environment variable and sends a POST `/register` request on startup. Config-server stores all URLs in a dictionary grouped by service name. This confirms that all service instances successfully connected to config-server.
 
 ---
 
-## Step 1.1 — First batch of 10 POST transactions
+## Hazelcast cluster — 3 nodes running
+
+To verify that all 3 Hazelcast nodes formed a cluster:
+
+```bash
+docker logs hazelcast1 | grep "Members"
+```
+
+![Hazelcast cluster — 3 members](./images/hazelcast.png)
+
+**Result:** Logs show `Members {size:3}`: all three nodes
+discovered each other and formed a single cluster.
+
+---
+
+## First batch of 10 POST transactions
+
+**Note:** The lab description mentions transactions `msg1–msg10`.
+In my implementation, transactions are structured JSON objects with `user_id` and `amount` fields, which is a more realistic approach. To demonstrate the required 10 transactions, I sent amounts `1–10` for `user1`, which produces the same result — 10 distinct messages in the queue with unique transaction IDs.
 
 ```bash
 for i in $(seq 1 10); do
@@ -100,9 +120,9 @@ done
 
 ---
 
-## Step 2 — Second batch of 10 POST transactions
+## Additional stability check (second batch)
 
-I ran the same loop again to confirm consistent behavior:
+As an additional stability check (not required), I ran the same loop one more time to confirm that the queue handles multiple batches correctly:
 
 ![Step 2 — second 10 transactions queued](./images/step2.png)
 
@@ -110,7 +130,7 @@ I ran the same loop again to confirm consistent behavior:
 
 ---
 
-## Step 2.1 — Logging-service load distribution
+## Logging-service load distribution
 
 After sending the transactions, checked the logs of all three logging-service instances:
 
@@ -131,7 +151,7 @@ docker logs logging_service_3
 
 ---
 
-## Step 2.2 — GET request, verifying correct balance
+## GET request, verifying correct balance
 
 ```bash
 curl http://localhost:8001/user/user1
@@ -147,7 +167,7 @@ The balance is 110 because two batches of 10 transactions were sent (amounts 1�
 
 ---
 
-## Step 3 — Fault tolerance: pausing counter-service
+## Fault tolerance: pausing counter-service
 
 I paused counter-service to simulate a failure, then sent 3 more transactions:
 
@@ -172,7 +192,7 @@ done
 
 ---
 
-## Step 4 — GET returns null while counter is paused
+## GET returns null while counter is paused
 
 While counter-service was still paused:
 
@@ -188,7 +208,7 @@ curl http://localhost:8001/user/user1
 
 ---
 
-## Step 5 — Resuming counter-service, queue drains correctly
+## Resuming counter-service, queue drains correctly
 
 I unpaused counter-service and waited a few seconds:
 
