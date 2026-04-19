@@ -1,23 +1,112 @@
 version: "3.9"
 
 services:
-  logging_service:
+
+  config_server:
+    build: ./config_server
+    container_name: config_server
+    ports:
+      - "8000:8000"
+
+  hazelcast1:
+    image: hazelcast/hazelcast:5.5
+    container_name: hazelcast1
+    environment:
+      - HZ_CLUSTERNAME=dev
+      - HZ_NETWORK_JOIN_MULTICAST_ENABLED=false
+      - HZ_NETWORK_JOIN_TCPIP_ENABLED=true
+      - HZ_NETWORK_JOIN_TCPIP_MEMBERS=hazelcast1:5701,hazelcast2:5701,hazelcast3:5701
+      - HZ_NETWORK_PUBLICADDRESS=hazelcast1:5701
+    ports:
+      - "5701:5701"
+
+  hazelcast2:
+    image: hazelcast/hazelcast:5.5
+    container_name: hazelcast2
+    environment:
+      - HZ_CLUSTERNAME=dev
+      - HZ_NETWORK_JOIN_MULTICAST_ENABLED=false
+      - HZ_NETWORK_JOIN_TCPIP_ENABLED=true
+      - HZ_NETWORK_JOIN_TCPIP_MEMBERS=hazelcast1:5701,hazelcast2:5701,hazelcast3:5701
+      - HZ_NETWORK_PUBLICADDRESS=hazelcast2:5701
+    ports:
+      - "5702:5701"
+
+  hazelcast3:
+    image: hazelcast/hazelcast:5.5
+    container_name: hazelcast3
+    environment:
+      - HZ_CLUSTERNAME=dev
+      - HZ_NETWORK_JOIN_MULTICAST_ENABLED=false
+      - HZ_NETWORK_JOIN_TCPIP_ENABLED=true
+      - HZ_NETWORK_JOIN_TCPIP_MEMBERS=hazelcast1:5701,hazelcast2:5701,hazelcast3:5701
+      - HZ_NETWORK_PUBLICADDRESS=hazelcast3:5701
+    ports:
+      - "5703:5701"
+
+  logging_service_1:
     build: ./logging_service
-    container_name: logging_service
+    container_name: logging_service_1
     ports:
       - "8002:8002"
+    environment:
+      - CONFIG_SERVER_URL=http://config_server:8000
+      - SERVICE_URL=http://logging_service_1:8002
+    depends_on:
+      - config_server
+
+  logging_service_2:
+    build: ./logging_service
+    container_name: logging_service_2
+    ports:
+      - "8004:8002"
+    environment:
+      - CONFIG_SERVER_URL=http://config_server:8000
+      - SERVICE_URL=http://logging_service_2:8002
+    depends_on:
+      - config_server
+
+  logging_service_3:
+    build: ./logging_service
+    container_name: logging_service_3
+    ports:
+      - "8005:8002"
+    environment:
+      - CONFIG_SERVER_URL=http://config_server:8000
+      - SERVICE_URL=http://logging_service_3:8002
+    depends_on:
+      - config_server
 
   counter_service:
     build: ./counter_service
     container_name: counter_service
     ports:
       - "8003:8003"
+    environment:
+      - CONFIG_SERVER_URL=http://config_server:8000
+      - SERVICE_URL=http://counter_service:8003
+      - HZ_HOSTS=hazelcast1:5701,hazelcast2:5701,hazelcast3:5701
+    depends_on:
+      - config_server
+      - hazelcast1
+      - hazelcast2
+      - hazelcast3
 
   facade_service:
     build: ./facade_service
     container_name: facade_service
     ports:
       - "8001:8001"
+    environment:
+      - CONFIG_SERVER_URL=http://config_server:8000
+      - SERVICE_URL=http://facade_service:8001
+      - HZ_HOSTS=hazelcast1:5701,hazelcast2:5701,hazelcast3:5701
     depends_on:
-      - logging_service
+      - config_server
+      - hazelcast1
+      - hazelcast2
+      - hazelcast3
+      - logging_service_1
+      - logging_service_2
+      - logging_service_3
       - counter_service

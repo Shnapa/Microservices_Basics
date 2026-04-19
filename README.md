@@ -1,93 +1,215 @@
-# Microservices Basics – Facade, Logging, Counter
+# Lab 4 — Microservices with Messaging Queue
 
-### Requirements
+## What this lab is about
 
-- Python 3.11+
-- pip (Python package manager)
-- Docker + Docker Compose
+In lab I extended the microservices system from the previous lab by adding a **message queue** (Hazelcast Distributed Queue) between `facade-service` and `counter-service`. The idea is instead of waiting for counter-service to update the balance (which could be slow), facade-service just throws the message into the queue and moves on. Counter-service picks it up when it's ready.
 
-### Addditional installations for local run
-```bash
-pip install fastapi uvicorn httpx
-```
-
-## 1. Description
-
-In this project I implemented a small microservices-based system with three FastAPI services and an asynchronous Python client:
-
-- **facade_service** – main HTTP API for clients. It accepts transaction requests, forwards them to the other services, aggregates the responses and returns final results.
-- **logging_service** – receives information about each transaction and stores it in an in-memory log so we can see and measure how much logging contributes to total processing time.
-- **counter_service** – maintains in-memory balances for users. It applies `+1` operations and returns current balances per user.
-
-I also wrote a load-testing client `load_test.py` (using `httpx` + `asyncio`) that simulates 10 concurrent clients and runs two scenarios from the assignment (separate accounts vs one shared account).
-
-## 2. Basic behaviour
-
-### Run with Docker Compose
-From the project root:
-
-```bash
-docker compose up --build
-```
-
-This starts three containers:
-- logging_service on port 8002
-- counter_service on port 8003
-- facade_service on port 8001
-The client and curl commands below talk to facade_service on http://127.0.0.1:8001
-
-![Basic curl requests and responses](images/basic.png)  
-
-To verify the basic logic before running load tests, I started all three services (via Docker Compose) and executed several POST /transactions requests with positive and negative amounts for two different users, followed by GET requests to check the final balances.
-
-![logs for basic test](images/basic_outputs.png) 
-
-The responses show that:
-user_a ends with balance 15.0 and two transactions +10 and +5.
-user_b ends with balance 13.0 and two transactions +20 and -7.
-/accounts returns both balances (user_a: 15.0, user_b: 13.0).
-
-
-## Load test scenarios
-
-To test the system under load, I used the `load_test.py` client which simulates 10 concurrent clients and runs two scenarios.  
-Both scenarios finished successfully and produced the expected final balances.
-
-### How to run
-
-With all three services running (via Docker Compose):
-```bash
-python3.11 load_test.py
-```
-
-### Scenario 1 – 10 clients, 10k tx each, separate accounts
-
-In the first scenario, 10 virtual clients each send 10 000 `POST /transactions` requests to **their own** account (`user1` … `user10`).  
-The expected result is that every account ends with balance 10 000, and the logs show that all updates were applied.
-
-Screenshots:
-
-![Scenario 1 load test output](images/scenario1.png)  
-Console output of load_test.py for Scenario 1 with total time (~1146 s), 100 000 requests (≈87 RPS) and final balances 10 000.0 for user1…user10, plus accumulated timing for logging and counter services.
+I also added a **config-server** that keeps track of all running service instances, so facade-service always knows where to send requests.
 
 ---
 
-### Scenario 2 – 10 clients, 10k tx each, same account
+## System Architecture
 
-In the second scenario, the same 10 clients each send 10 000 `POST /transactions` requests to **one shared** account (`same_user`).  
-The expected result is that `same_user` ends with balance 100 000, and the logs show that all operations on this single account were processed correctly.
+| Layer | Service | Port |
+|---|---|---|
+| Entry point | `facade-service` | 8001 |
+| Logging | `logging-service` × 3 | 8002, 8004, 8005 |
+| Balance | `counter-service` | 8003 |
+| Registry | `config-server` | 8000 |
+| Queue nodes | `hazelcast1/2/3` | 5701, 5702, 5703 |
 
-Screenshots:
+**Request flow:**
 
-![Scenario 2 load test output](images/scenario2.png)  
-Console output of load_test.py for Scenario 2 with total time (~1145 s), 100 000 requests (≈87 RPS), final balance 100 000.0 for same_user, and separate totals for time spent calling logging and counter services.
+```
+Client
+  │
+  ▼
+facade-service
+  ├──► (POST /log) ──► random logging-service instance
+  │                    (chosen via config-server)
+  │
+  └──► (PUT msg) ──► Hazelcast Queue
+                          │
+                          ▼
+                    counter-service
+                    (reads & updates balance)
+```
+
+**Service registration flow:**
+
+```
+logging-service x3 ──┐
+counter-service ──────┼──► config-server (registry)
+facade-service ───────┘
+```
+
+---
+
+## How to run
+
+```bash
+docker-compose up --build
+```
+
+---
+
+## Step 1 — All services registered on config-server
+
+After running `docker-compose up --build`, all 9 containers started. Each service registers itself on config-server at startup via a POST request. To verify:
+
+```bash
+curl http://localhost:8000/services
+```
+
+![Step 1 — all services registered](./images/step1.png)
+
+**Result:**
+
+```json
+{
+  "logging-service": [
+    "http://logging_service_1:8002",
+    "http://logging_service_2:8002",
+    "http://logging_service_3:8002"
+  ],
+  "counter-service": ["http://counter_service:8003"],
+  "facade-service": ["http://facade_service:8001"]
+}
+```
+
+**Why it works:** Every service reads `CONFIG_SERVER_URL` from its environment variable and sends a POST `/register` request on startup. Config-server stores all URLs in a dictionary grouped by service name. This confirms that all 5 service types (3 logging instances + counter + facade) successfully connected to config-server.
+
+---
+
+## Step 1.1 — First batch of 10 POST transactions
+
+```bash
+for i in $(seq 1 10); do
+  curl -s -X POST http://localhost:8001/transactions \
+    -H "Content-Type: application/json" \
+    -d "{\"user_id\": \"user1\", \"amount\": $i}"
+  echo ""
+done
+```
+
+![Step 1.1 — first 10 transactions queued](./images/step1.1.png)
+
+**Result:** All 10 transactions returned `"status": "queued"`.
+
+**Why it works:** Facade-service generates a UUID, logs the transaction to a random logging-service, and puts the message into the Hazelcast Queue — without waiting for counter-service at all.
+
+---
+
+## Step 2 — Second batch of 10 POST transactions
+
+I ran the same loop again to confirm consistent behavior:
+
+![Step 2 — second 10 transactions queued](./images/step2.png)
+
+**Result:** All 10 transactions returned `"status": "queued"` again. This confirms the queue is stable and facade-service is stateless — every POST is handled independently.
+
+---
+
+## Step 2.1 — Logging-service load distribution
+
+After sending the transactions, checked the logs of all three logging-service instances:
+
+```bash
+docker logs logging_service_1
+docker logs logging_service_2
+docker logs logging_service_3
+```
+
+![Step 2.1 — logging service load distribution](./images/step2.1.png)
+
+**Result:**
+- `logging_service_1` received amounts: 1, 5, 6, 7, 10...
+- `logging_service_2` received amounts: 2, 3, 4, 8, 9, 10...
+- `logging_service_3` received amounts: 9, 6, 7...
+
+**Why it works:** Facade-service calls config-server to get all logging-service URLs and picks one with `random.choice()`. All 3 instances received transactions, confirming that random load balancing works correctly.
+
+---
+
+## Step 2.2 — GET request, verifying correct balance
+
+```bash
+curl http://localhost:8001/user/user1
+```
+
+![Step 2.2 — GET with correct balance](./images/step2.2.png)
+
+**Result:** `"balance": 110.0`
+
+The balance is 110 because two batches of 10 transactions were sent (amounts 1–10 twice), so 55 × 2 = 110. The full transaction list was returned with all UUIDs and timestamps.
+
+**Why it works:** Counter-service reads messages from the Hazelcast Queue one by one and updates the in-memory balance. Facade-service GET asks config-server for counter-service URL and queries it directly. The correct value confirms all queued messages were consumed successfully.
+
+---
+
+## Step 3 — Fault tolerance: pausing counter-service
+
+I paused counter-service to simulate a failure, then sent 3 more transactions:
+
+```bash
+docker pause counter_service
+```
+
+```bash
+for i in $(seq 1 3); do
+  curl -s -X POST http://localhost:8001/transactions \
+    -H "Content-Type: application/json" \
+    -d "{\"user_id\": \"user1\", \"amount\": $i}"
+  echo ""
+done
+```
+
+![Step 3 — POST works while counter is paused](./images/step3.png)
+
+**Result:** All 3 transactions returned `"status": "queued"` — no errors at all.
+
+**Why it works:** Facade-service only interacts with the Hazelcast Queue during POST — it never calls counter-service directly. The queue keeps accumulating messages even when the consumer is down. This is the core benefit of async messaging.
+
+---
+
+## Step 4 — GET returns null while counter is paused
+
+While counter-service was still paused:
+
+```bash
+curl http://localhost:8001/user/user1
+```
+
+![Step 4 — balance is null while counter is paused](./images/step4.png)
+
+**Result:** `"balance": null`
+
+**Why it works:** Facade-service tries to reach counter-service but the connection fails since it is paused. The `try/except` block catches the error and returns `null` instead of crashing. The system stays alive and correctly signals that balance data is temporarily unavailable.
+
+---
+
+## Step 5 — Resuming counter-service, queue drains correctly
+
+I unpaused counter-service and waited a few seconds:
+
+```bash
+docker unpause counter_service
+```
+
+```bash
+curl http://localhost:8001/user/user1
+```
+
+![Step 5 — counter resumed, correct balance restored](./images/step5.png)
+
+**Result:** `"balance": 116.0`
+
+The balance increased from 110 to 116 (+1 +2 +3 from the 3 queued transactions).
+
+**Why it works:** As soon as counter-service comes back online, its background thread resumes polling the Hazelcast Queue with `queue.poll(timeout=1)`. All 3 accumulated messages were processed and the balance was updated correctly. This confirms that Hazelcast Queue durably holds messages until the consumer is ready.
+
+---
 
 ## Conclusion
 
-The basic manual tests show that the facade, logging and counter services work correctly together:
-simple POST /transactions and GET /user/{id} calls update balances as expected, support both positive and negative amounts, and are properly logged by all services.
-
-The two load scenarios confirm that the system handles concurrent traffic correctly:
-for 10 clients with 10k transactions each, all separate accounts reach 10 000 and the shared account reaches 100 000 without lost or duplicated updates.
-
-The measured times and request rates demonstrate realistic performance for this architecture and clearly highlight the cost of inter‑service communication and updates to a single shared account under high load.
+This lab demonstrated how a message queue (Hazelcast Distributed Queue) decouples services and improves fault tolerance. Facade-service never blocks waiting for counter-service, and the system continues to accept transactions even when counter-service is down. Once it comes back, it automatically catches up with all queued messages.
