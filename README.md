@@ -223,25 +223,7 @@ docker start logging_service_1
 
 ---
 
-## 10. Console output
-
-The services print useful startup and processing information. The logs show that services register in Consul and connect to Hazelcast or Message Queue.
-
-Useful commands:
-
-```bash
-docker logs facade_service --tail 40
-docker logs logging_service_1 --tail 40
-docker logs counter_service --tail 40
-```
-
-Example log screenshot:
-
-![Service logs](screenshots/failover_log.png)
-
----
-
-## 11. Load test
+## 10. Load test
 
 The load test uses two scenarios from the previous labs:
 
@@ -252,7 +234,7 @@ The script checks that balances are correct after all transactions are processed
 
 ---
 
-## 12. Performance results
+## 11. Performance results
 
 ### Scenario 1 – 10 users, 10,000 transactions each
 
@@ -284,7 +266,7 @@ In Lab 5, the final balance was correct.
 
 ---
 
-## 13. Comparison with previous labs
+## 12. Comparison with previous labs
 
 | Test scenarios | Task 1 (in-mem) | Task 3 (DB) | Task 5 (final) |
 |---|---|---|---|
@@ -329,7 +311,7 @@ So, the final version works correctly, but its performance became worse compared
 
 ---
 
-## 14. Performance analysis
+## 13. Performance analysis
 
 The Lab 5 version works correctly, but it is slower than previous versions.
 
@@ -343,7 +325,7 @@ Even though performance is not strong, both required scenarios finished successf
 
 ---
 
-## 15. Conclusion
+## 14. Conclusion
 
 In this lab, I added Consul to the microservice system. Consul is used as a Service Registry, Service Discovery mechanism, and Config Server.
 
