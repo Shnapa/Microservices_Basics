@@ -121,7 +121,7 @@ Message Queue configuration:
 
 `logging_service` reads Hazelcast configuration from Consul. `facade_service` and `counter_service` read Message Queue configuration from Consul.
 
-![Consul Key Value](screenshots/key/value.png)
+![Consul Key Value](screenshots/key:value.png)
 
 ---
 
