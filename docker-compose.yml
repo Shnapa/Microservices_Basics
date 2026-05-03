@@ -2,11 +2,39 @@ version: "3.9"
 
 services:
 
-  config_server:
-    build: ./config_server
-    container_name: config_server
+  consul:
+    image: hashicorp/consul:latest
+    container_name: consul
+    command: agent -server -bootstrap-expect=1 -ui -client=0.0.0.0
     ports:
-      - "8000:8000"
+      - "8500:8500"
+    healthcheck:
+      test: ["CMD-SHELL", "consul members >/dev/null 2>&1 || exit 1"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  consul_kv_init:
+    image: curlimages/curl:8.10.1
+    container_name: consul_kv_init
+    depends_on:
+      consul:
+        condition: service_healthy
+    entrypoint: /bin/sh
+    command:
+      - -c
+      - |
+        echo "Initializing Consul KV..."
+
+        curl -X PUT --data "hazelcast1:5701,hazelcast2:5701,hazelcast3:5701" http://consul:8500/v1/kv/hazelcast/hosts
+        curl -X PUT --data "dev" http://consul:8500/v1/kv/hazelcast/cluster-name
+        curl -X PUT --data "transactions-by-id" http://consul:8500/v1/kv/hazelcast/map-name
+
+        curl -X PUT --data "hazelcast1:5701,hazelcast2:5701,hazelcast3:5701" http://consul:8500/v1/kv/message-queue/hosts
+        curl -X PUT --data "dev" http://consul:8500/v1/kv/message-queue/cluster-name
+        curl -X PUT --data "counter-queue" http://consul:8500/v1/kv/message-queue/queue-name
+
+        echo "Consul KV initialized."
 
   hazelcast1:
     image: hazelcast/hazelcast:5.5
@@ -50,10 +78,22 @@ services:
     ports:
       - "8002:8002"
     environment:
-      - CONFIG_SERVER_URL=http://config_server:8000
-      - SERVICE_URL=http://logging_service_1:8002
+      - CONSUL_URL=http://consul:8500
+      - SERVICE_NAME=logging-service
+      - SERVICE_HOST=logging_service_1
+      - SERVICE_PORT=8002
+      - SERVICE_ID=logging-service-1
     depends_on:
-      - config_server
+      consul:
+        condition: service_healthy
+      consul_kv_init:
+        condition: service_completed_successfully
+      hazelcast1:
+        condition: service_started
+      hazelcast2:
+        condition: service_started
+      hazelcast3:
+        condition: service_started
 
   logging_service_2:
     build: ./logging_service
@@ -61,10 +101,22 @@ services:
     ports:
       - "8004:8002"
     environment:
-      - CONFIG_SERVER_URL=http://config_server:8000
-      - SERVICE_URL=http://logging_service_2:8002
+      - CONSUL_URL=http://consul:8500
+      - SERVICE_NAME=logging-service
+      - SERVICE_HOST=logging_service_2
+      - SERVICE_PORT=8002
+      - SERVICE_ID=logging-service-2
     depends_on:
-      - config_server
+      consul:
+        condition: service_healthy
+      consul_kv_init:
+        condition: service_completed_successfully
+      hazelcast1:
+        condition: service_started
+      hazelcast2:
+        condition: service_started
+      hazelcast3:
+        condition: service_started
 
   logging_service_3:
     build: ./logging_service
@@ -72,10 +124,22 @@ services:
     ports:
       - "8005:8002"
     environment:
-      - CONFIG_SERVER_URL=http://config_server:8000
-      - SERVICE_URL=http://logging_service_3:8002
+      - CONSUL_URL=http://consul:8500
+      - SERVICE_NAME=logging-service
+      - SERVICE_HOST=logging_service_3
+      - SERVICE_PORT=8002
+      - SERVICE_ID=logging-service-3
     depends_on:
-      - config_server
+      consul:
+        condition: service_healthy
+      consul_kv_init:
+        condition: service_completed_successfully
+      hazelcast1:
+        condition: service_started
+      hazelcast2:
+        condition: service_started
+      hazelcast3:
+        condition: service_started
 
   counter_service:
     build: ./counter_service
@@ -83,14 +147,22 @@ services:
     ports:
       - "8003:8003"
     environment:
-      - CONFIG_SERVER_URL=http://config_server:8000
-      - SERVICE_URL=http://counter_service:8003
-      - HZ_HOSTS=hazelcast1:5701,hazelcast2:5701,hazelcast3:5701
+      - CONSUL_URL=http://consul:8500
+      - SERVICE_NAME=counter-service
+      - SERVICE_HOST=counter_service
+      - SERVICE_PORT=8003
+      - SERVICE_ID=counter-service-1
     depends_on:
-      - config_server
-      - hazelcast1
-      - hazelcast2
-      - hazelcast3
+      consul:
+        condition: service_healthy
+      consul_kv_init:
+        condition: service_completed_successfully
+      hazelcast1:
+        condition: service_started
+      hazelcast2:
+        condition: service_started
+      hazelcast3:
+        condition: service_started
 
   facade_service:
     build: ./facade_service
@@ -98,15 +170,27 @@ services:
     ports:
       - "8001:8001"
     environment:
-      - CONFIG_SERVER_URL=http://config_server:8000
-      - SERVICE_URL=http://facade_service:8001
-      - HZ_HOSTS=hazelcast1:5701,hazelcast2:5701,hazelcast3:5701
+      - CONSUL_URL=http://consul:8500
+      - SERVICE_NAME=facade-service
+      - SERVICE_HOST=facade_service
+      - SERVICE_PORT=8001
+      - SERVICE_ID=facade-service-1
     depends_on:
-      - config_server
-      - hazelcast1
-      - hazelcast2
-      - hazelcast3
-      - logging_service_1
-      - logging_service_2
-      - logging_service_3
-      - counter_service
+      consul:
+        condition: service_healthy
+      consul_kv_init:
+        condition: service_completed_successfully
+      hazelcast1:
+        condition: service_started
+      hazelcast2:
+        condition: service_started
+      hazelcast3:
+        condition: service_started
+      logging_service_1:
+        condition: service_started
+      logging_service_2:
+        condition: service_started
+      logging_service_3:
+        condition: service_started
+      counter_service:
+        condition: service_started
